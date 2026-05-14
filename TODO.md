@@ -1,7 +1,7 @@
 # TODO
 
 1. On user join, change their nickname to "Thursday" (done)
-2. Every Thursday at midnight, Central time, create a new channel, "#the-final-thursday" and give @everyone perms to chat and react in it
+2. Every Thursday at midnight, Central time, create a new channel, "#the-final-thursday" and give @everyone perms to chat and react in it (done)
 3. Every Fr*day at midnight, Central time, change channel perms to read-only for @everyone and send a message, "@everyone Thursday is gone forever."
 4. Every Fr*day at midnight, Central time, change the latest Thursday channel name to "#thursday-xxx" where xxx is the number of thursdays there's been so far in the server.
 5. Every 6 months, (or check exactly how many Thursdays are in each category) create a new channel category: "THURSDAY YEAR X (x/2)"; future thursdays will go here for the next 6 months.
@@ -16,3 +16,4 @@
 "thursday_category_id": is "1504561000563609720" for testing but is temporary hopefully and will not be needed once this is production ready, hopefully.
 
 guild_id and thursday_category_id will need to be changed or deleted before being put into production.
+
