@@ -7,7 +7,7 @@
 5. Every 6 months, (or check exactly how many Thursdays are in each category) create a new channel category: "THURSDAY YEAR X (x/2)"; future thursdays will go here for the next 6 months. (done)
 6. Add commands for Thursday Admins to change the current, past, or next Thursday channel name.
 7. Create db.json on the first run or read from it if it exists and contains all necessary fields: stores info such as next thursday channel name override. Gitignore this file.
-8. Auto-delete blasphemous messages that praise fr*day or curse Thursday. (very limited vocabulary blacklist for now)
+8. ~~Auto-delete blasphemous messages that praise fr*day or curse Thursday. (very limited vocabulary blacklist for now)~~ (scrapped for now)
 
 ## Config.json notes
 
