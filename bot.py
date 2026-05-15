@@ -4,7 +4,9 @@ import json
 import datetime
 from datetime import timedelta
 from zoneinfo import ZoneInfo
+from pathlib import Path
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
@@ -34,6 +36,62 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
+# db.json helpers
+
+DB_PATH = Path('db.json')
+
+
+def load_db() -> dict:
+    """Read and return the full db.json contents as a dict."""
+    if not DB_PATH.exists():
+        return {}
+    text = DB_PATH.read_text().strip()
+    return json.loads(text) if text else {}
+
+
+def save_db(data: dict) -> None:
+    """Write *data* back to db.json (pretty-printed)."""
+    DB_PATH.write_text(json.dumps(data, indent=2))
+
+
+def get_thursday_only_channels(guild_id: int) -> list[int]:
+    """Return the list of Thursday-only channel IDs for a guild."""
+    db = load_db()
+    return db.get(str(guild_id), {}).get("thursday_only_channels", [])
+
+
+def add_thursday_only_channel(guild_id: int, channel_id: int) -> bool:
+    """Append *channel_id* to the guild's Thursday-only list.
+
+    Returns True if the channel was newly added, False if it was already present.
+    """
+    db = load_db()
+    key = str(guild_id)
+    guild_data = db.setdefault(key, {})
+    channels: list[int] = guild_data.setdefault("thursday_only_channels", [])
+    if channel_id in channels:
+        return False
+    channels.append(channel_id)
+    save_db(db)
+    return True
+
+
+def remove_thursday_only_channel(guild_id: int, channel_id: int) -> bool:
+    """Remove *channel_id* from the guild's Thursday-only list.
+
+    Returns True if the channel was removed, False if it wasn't in the list.
+    """
+    db = load_db()
+    key = str(guild_id)
+    channels: list[int] = db.get(key, {}).get("thursday_only_channels", [])
+    if channel_id not in channels:
+        return False
+    channels.remove(channel_id)
+    db[key]["thursday_only_channels"] = channels
+    save_db(db)
+    return True
+
+
 # helper functions
 
 def get_thursday_year_and_half(date: datetime.date) -> tuple[int, int]:
@@ -51,7 +109,7 @@ def get_thursday_year_and_half(date: datetime.date) -> tuple[int, int]:
 def thursday_category_name(year_num: int, half: int) -> str:
     """Build the canonical category name for the given year/half period.
 
-    Example: thursday_category_name(8, 1) → 'THURSDAY YEAR 8 (1/2)'
+    Example: thursday_category_name(8, 1) -> 'THURSDAY YEAR 8 (1/2)'
     """
     return f"THURSDAY YEAR {year_num} ({half}/2)"
 
@@ -174,10 +232,65 @@ async def get_or_create_target_category(
     return cat
 
 
+# Thursday-only channel lock / unlock (all servers)
+
+_LOCKED_PERMS   = discord.PermissionOverwrite(
+    view_channel=True,
+    send_messages=False,
+    read_message_history=True,
+)
+_UNLOCKED_PERMS = discord.PermissionOverwrite(
+    view_channel=True,
+    send_messages=True,
+    read_message_history=True,
+)
+
+
+async def _apply_thursday_only_perms(locked: bool) -> None:
+    """Lock or unlock every Thursday-only channel across all guilds in db.json."""
+    db = load_db()
+    perms = _LOCKED_PERMS if locked else _UNLOCKED_PERMS
+    action = "Locked" if locked else "Unlocked"
+
+    for guild_id_str, guild_data in db.items():
+        channel_ids: list[int] = guild_data.get("thursday_only_channels", [])
+        if not channel_ids:
+            continue
+
+        guild = bot.get_guild(int(guild_id_str))
+        if not guild:
+            print(f"_apply_thursday_only_perms: guild {guild_id_str} not found")
+            continue
+
+        for channel_id in channel_ids:
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                print(
+                    f"_apply_thursday_only_perms: channel {channel_id} "
+                    f"not found in guild {guild_id_str}"
+                )
+                continue
+
+            overwrites = channel.overwrites
+            overwrites[guild.default_role] = perms
+            try:
+                await channel.edit(overwrites=overwrites)
+                print(f"{action} Thursday-only channel #{channel.name} in '{guild.name}'")
+            except discord.Forbidden as e:
+                print(f"_apply_thursday_only_perms: #{channel.name}: forbidden: {e}")
+            except discord.HTTPException as e:
+                print(f"_apply_thursday_only_perms: #{channel.name}: {e}")
+
+
 # bot events
 
 @bot.event
 async def on_ready():
+    # Create db.json if it doesn't exist
+    if not DB_PATH.exists():
+        save_db({})
+        print('Created db.json')
+
     await bot.tree.sync()  # Registers slash commands with Discord
     thursday_open.start()
     print(f'{bot.user} is online!')
@@ -229,6 +342,9 @@ async def thursday_close():
         print(f"thursday_close: {e}")
     except discord.HTTPException as e:
         print(f"thursday_close: failed: {e}")
+
+    # Re-lock all Thursday-only channels across every guild
+    await _apply_thursday_only_perms(locked=True)
 
 
 @tasks.loop(time=MIDNIGHT)
@@ -283,6 +399,89 @@ async def thursday_open():
     except discord.HTTPException as e:
         print(f"thursday_open: failed to create channel: {e}")
 
+    # Unlock all Thursday-only channels across every guild
+    await _apply_thursday_only_perms(locked=False)
+
+
+# Slash commands
+
+@bot.tree.command(
+    name="set-thursday-only",
+    description="Make a channel read-only for @everyone except on Thursdays.",
+)
+@app_commands.describe(channel="The channel to restrict to Thursdays only.")
+@app_commands.checks.has_permissions(manage_channels=True)
+async def set_thursday_only(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+) -> None:
+    """Register *channel* as Thursday-only and immediately apply the correct perms."""
+    guild = interaction.guild
+
+    # Persist - bail early if already registered
+    newly_added = add_thursday_only_channel(guild.id, channel.id)
+    if not newly_added:
+        await interaction.response.send_message(
+            f"{channel.mention} is already set as Thursday-only.",
+            ephemeral=True,
+        )
+        return
+
+    # Apply permissions right now based on the current day
+    today      = datetime.datetime.now(CENTRAL)
+    is_thursday = today.weekday() == 3
+    perms       = _UNLOCKED_PERMS if is_thursday else _LOCKED_PERMS
+
+    overwrites = channel.overwrites
+    overwrites[guild.default_role] = perms
+
+    try:
+        await channel.edit(overwrites=overwrites)
+    except discord.Forbidden:
+        # Roll back the db entry so the state stays consistent
+        remove_thursday_only_channel(guild.id, channel.id)
+        await interaction.response.send_message(
+            f"I don't have permission to edit {channel.mention}. "
+            "Please check my role's channel permissions and try again.\n"
+            "-# Note: I cannot edit permissions I don't have myself.",
+            ephemeral=True,
+        )
+        return
+    except discord.HTTPException as e:
+        remove_thursday_only_channel(guild.id, channel.id)
+        await interaction.response.send_message(
+            f"Something went wrong while updating {channel.mention}: `{e}`",
+            ephemeral=True,
+        )
+        return
+
+    status = "unlocked for Thursday" if is_thursday else "locked until Thursday"
+    await interaction.response.send_message(
+        f"{channel.mention} is now Thursday-only (currently {status}).",
+        ephemeral=True,
+    )
+    print(
+        f"set-thursday-only: #{channel.name} in '{guild.name}' "
+        f"registered and {'unlocked' if is_thursday else 'locked'} "
+        f"by {interaction.user}"
+    )
+
+
+@set_thursday_only.error
+async def set_thursday_only_error(
+    interaction: discord.Interaction,
+    error: app_commands.AppCommandError,
+) -> None:
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message(
+            "You need the **Manage Channels** permission to use this command.",
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            f"An unexpected error occurred: `{error}`",
+            ephemeral=True,
+        )
 
 # Run the bot
 if __name__ == '__main__':
