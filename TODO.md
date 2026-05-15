@@ -5,9 +5,9 @@
 3. [x] Every Fr*day at midnight, Central time, change channel perms to read-only for @everyone and send a message, "@everyone Thursday is gone forever." (done)
 4. [x] Every Fr*day at midnight, Central time, change the latest Thursday channel name to "#thursday-xxx" where xxx is the number of thursdays there's been so far in the server. (done)
 5. [x] Every 6 months, (or check exactly how many Thursdays are in each category) create a new channel category: "THURSDAY YEAR X (x/2)"; future thursdays will go here for the next 6 months. (done)
-6. [ ] Add commands for Thursday Admins to change the current, past, or next Thursday channel name.
-7. [ ] Create db.json on the first run or read from it if it exists and contains all necessary fields: stores info such as next thursday channel name override. Gitignore this file.
-8. [ ] ~~Auto-delete blasphemous messages that praise fr*day or curse Thursday. (very limited vocabulary blacklist for now)~~ (scrapped for now)
+6. [ ] Add commands for Thursday Admins to set which channels people can speak in on Thursdays; set chat perms for them at midnight on Thursdays and Fr*days.
+7. [ ] Add commands for Thursday Admins to change the current, past, or next Thursday channel name.
+8. [ ] Create db.json on the first run or read from it if it exists and contains all necessary fields: stores info such as next thursday channel name override. Gitignore this file.
 
 ## Config.json notes
 
