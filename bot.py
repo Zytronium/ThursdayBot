@@ -237,10 +237,10 @@ async def thursday_open():
     now     = datetime.datetime.now(CENTRAL)
     weekday = now.weekday()  # 0=Mon, 3=Thu, 4=Fri
 
-    if weekday == 3:  # Friday – close last night's Thursday channel
+    if weekday == 4:  # Friday – close last night's Thursday channel
         await thursday_close()
         return
-    elif weekday != 2:  # Not Thursday or Friday – nothing to do
+    elif weekday != 3:  # Not Thursday or Friday – nothing to do
         return
 
     today        = now.date()
