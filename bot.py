@@ -22,7 +22,7 @@ FIRST_THURSDAY   = datetime.date.fromisoformat(config['first_thursday'])
 THURSDAY_CHANNEL = "the-final-thursday"  # Will be overridable via db.json later
 
 CENTRAL  = ZoneInfo("America/Chicago")
-MIDNIGHT = datetime.time(0, 0, 0, tzinfo=CENTRAL)
+MIDNIGHT = datetime.time(21, 12, 40, tzinfo=CENTRAL)
 
 # Max Thursday channels before a first-half category overflows into the second half category
 CHANNELS_PER_HALF = 26
@@ -233,15 +233,14 @@ async def thursday_close():
 
 @tasks.loop(time=MIDNIGHT)
 async def thursday_open():
-    print("It's midnight.")
     # Tasks fire every day at midnight Central; handle Thursdays and Fridays
     now     = datetime.datetime.now(CENTRAL)
     weekday = now.weekday()  # 0=Mon, 3=Thu, 4=Fri
 
-    if weekday == 3:  # Friday – close last night's Thursday channel
+    if weekday == 4:  # Friday – close last night's Thursday channel
         await thursday_close()
         return
-    elif weekday != 2:  # Not Thursday or Friday – nothing to do
+    elif weekday != 3:  # Not Thursday or Friday – nothing to do
         return
 
     today        = now.date()
