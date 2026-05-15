@@ -2,6 +2,7 @@
 import os
 import json
 import datetime
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands, tasks
@@ -195,11 +196,52 @@ async def on_member_join(member: discord.Member):
         print(f"Could not rename {member.name}: {e}")
 
 
+async def thursday_close():
+    """Lock the open Thursday channel and rename it with its sequence number."""
+    today        = datetime.datetime.now(CENTRAL).date()
+    thursday_num = count_thursdays_so_far(today)  # Friday's count == the just-passed Thursday's
+
+    guild = bot.get_guild(int(GUILD_ID))
+    if not guild:
+        print("thursday_close: guild not found")
+        return
+
+    channel = discord.utils.get(guild.text_channels, name=THURSDAY_CHANNEL)
+    if not channel:
+        print(f"thursday_close: #{THURSDAY_CHANNEL} not found")
+        return
+
+    # @everyone can only read and react; no sending
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=False,
+            read_message_history=True,
+        )
+    }
+
+    try:
+        await channel.send("@everyone Thursday is gone forever.")
+        await channel.edit(name=f"thursday-{thursday_num}")
+        await channel.edit(overwrites=overwrites)
+        print(f"Closed #{channel.name} (Thursday #{thursday_num})")
+    except discord.Forbidden as e:
+        print(f"thursday_close: {e}")
+    except discord.HTTPException as e:
+        print(f"thursday_close: failed: {e}")
+
+
 @tasks.loop(time=MIDNIGHT)
 async def thursday_open():
-    # Tasks fire every day at midnight Central; skip non-Thursdays
-    now = datetime.datetime.now(CENTRAL)
-    if now.weekday() != 3:  # 0=Mon, 3=Thu, 4=Fri
+    print("It's midnight.")
+    # Tasks fire every day at midnight Central; handle Thursdays and Fridays
+    now     = datetime.datetime.now(CENTRAL)
+    weekday = now.weekday()  # 0=Mon, 3=Thu, 4=Fri
+
+    if weekday == 3:  # Friday – close last night's Thursday channel
+        await thursday_close()
+        return
+    elif weekday != 2:  # Not Thursday or Friday – nothing to do
         return
 
     today        = now.date()
@@ -215,12 +257,11 @@ async def thursday_open():
         print("thursday_open: could not find or create a target category")
         return
 
-    # @everyone can read, send messages, and add reactions; nothing else by default
+    # @everyone can read, send messages, and reactions; nothing else by default
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
-            add_reactions=True,
             read_message_history=True,
         )
     }
@@ -238,8 +279,8 @@ async def thursday_open():
             f"Opened #{channel.name} in '{category.name}' "
             f"(Thursday #{thursday_num})"
         )
-    except discord.Forbidden:
-        print("thursday_open: missing Manage Channels permission")
+    except discord.Forbidden as e:
+        print(f"thursday_open: {e}")
     except discord.HTTPException as e:
         print(f"thursday_open: failed to create channel: {e}")
 
