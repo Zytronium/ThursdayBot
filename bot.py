@@ -92,6 +92,28 @@ def remove_thursday_only_channel(guild_id: int, channel_id: int) -> bool:
     return True
 
 
+def get_thursday_rename_override(guild_id: int) -> str | None:
+    """Return the pending Thursday rename override for a guild, or None if unset."""
+    db = load_db()
+    return db.get(str(guild_id), {}).get("thursday_rename_override")
+
+
+def set_thursday_rename_override(guild_id: int, name: str) -> None:
+    """Persist a Thursday rename override for a guild."""
+    db = load_db()
+    key = str(guild_id)
+    db.setdefault(key, {})["thursday_rename_override"] = name
+    save_db(db)
+
+
+def clear_thursday_rename_override(guild_id: int) -> None:
+    """Remove the Thursday rename override for a guild if it exists."""
+    db = load_db()
+    key = str(guild_id)
+    db.get(key, {}).pop("thursday_rename_override", None)
+    save_db(db)
+
+
 # helper functions
 
 def get_thursday_year_and_half(date: datetime.date) -> tuple[int, int]:
@@ -124,6 +146,14 @@ def count_thursdays_so_far(as_of_date: datetime.date | None = None) -> int:
     if as_of_date < FIRST_THURSDAY:
         return 0
     return (as_of_date - FIRST_THURSDAY).days // 7 + 1
+
+
+def next_or_current_thursday(as_of: datetime.date | None = None) -> datetime.date:
+    """Return today if it's Thursday, otherwise the date of the next Thursday."""
+    if as_of is None:
+        as_of = datetime.datetime.now(CENTRAL).date()
+    days_until = (3 - as_of.weekday()) % 7  # weekday 3 = Thursday; 0 if already Thursday
+    return as_of + timedelta(days=days_until)
 
 
 def find_thursday_category(
@@ -335,9 +365,15 @@ async def thursday_close():
 
     try:
         await channel.send("@everyone Thursday is gone forever.")
-        await channel.edit(name=f"thursday-{thursday_num}")
+        override = get_thursday_rename_override(guild.id)
+        new_name = override if override else f"thursday-{thursday_num}"
+        await channel.edit(name=new_name)
         await channel.edit(overwrites=overwrites)
-        print(f"Closed #{channel.name} (Thursday #{thursday_num})")
+        if override:
+            clear_thursday_rename_override(guild.id)
+            print(f"Closed #{new_name} (Thursday #{thursday_num}) [override applied]")
+        else:
+            print(f"Closed #{channel.name} (Thursday #{thursday_num})")
     except discord.Forbidden as e:
         print(f"thursday_close: {e}")
     except discord.HTTPException as e:
@@ -482,6 +518,78 @@ async def set_thursday_only_error(
             f"An unexpected error occurred: `{error}`",
             ephemeral=True,
         )
+
+
+@bot.tree.command(
+    name="override-thursday-rename",
+    description="Overrides what the next or current Thursday channel is renamed to on Fr*day. (one-time)",
+)
+@app_commands.describe(
+    rename="What to rename the channel to on Fr*day (e.g. thursmas-3). No # needed."
+)
+@app_commands.checks.has_permissions(manage_channels=True)
+async def override_thursday_rename(
+    interaction: discord.Interaction,
+    rename: str,
+) -> None:
+    """Set a one-time override for the name given to the current/next Thursday channel on Friday."""
+    # Strip a leading # if the user included one
+    rename = rename.lstrip("#").strip()
+    # Replace spaces with hyphens and set all lowercase
+    rename = rename.replace(" ", "-").lower()
+
+    if not rename:
+        await interaction.response.send_message(
+            "Please provide a valid channel name.",
+            ephemeral=True,
+        )
+        return
+
+    # Basic Discord channel-name validation (lowercase, hyphens/underscores, 1-100 chars)
+    import re
+    if not re.fullmatch(r"[a-z0-9_\-]{1,100}", rename):
+        await interaction.response.send_message(
+            "Invalid channel name. Use only lowercase letters, numbers, hyphens, "
+            "and underscores (1–100 characters).",
+            ephemeral=True,
+        )
+        return
+
+    set_thursday_rename_override(interaction.guild.id, rename)
+
+    thursday_date = next_or_current_thursday()
+    thursday_num  = count_thursdays_so_far(thursday_date)
+    is_today      = thursday_date == datetime.datetime.now(CENTRAL).date()
+    which         = "this Thursday" if is_today else f"the next Thursday ({thursday_date.strftime('%B %d')})"
+
+    await interaction.response.send_message(
+        f"Override set. When {which}'s channel closes on Fr\\*day, "
+        f"it will be renamed to #{rename} instead of #thursday-{thursday_num}.\n"
+        "-# This is a one-time override and will be cleared automatically after it is applied.",
+        ephemeral=True,
+    )
+    print(
+        f"override-thursday-rename: '{rename}' set for Thursday #{thursday_num} "
+        f"({thursday_date}) by {interaction.user} in '{interaction.guild.name}'"
+    )
+
+
+@override_thursday_rename.error
+async def override_thursday_rename_error(
+    interaction: discord.Interaction,
+    error: app_commands.AppCommandError,
+) -> None:
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message(
+            "You need the **Manage Channels** permission to use this command.",
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            f"An unexpected error occurred: `{error}`",
+            ephemeral=True,
+        )
+
 
 # Run the bot
 if __name__ == '__main__':
